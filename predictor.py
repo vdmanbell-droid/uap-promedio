@@ -1,7 +1,7 @@
 """
 Predictor de promedio (UAP)
 Formulario corto -> promedio semestral estimado.
-Modelo: promedio de Ridge regression y Random Forest, entrenado con la encuesta a 56 alumnos de la UAP.
+Modelo: promedio de Ridge regression y Random Forest, entrenado con la encuesta a alumnos de la UAP.
 """
 from pathlib import Path
 
@@ -40,11 +40,14 @@ QUESTIONS = {
 @st.cache_data
 def load_data(path):
     raw = pd.read_excel(path)
-    raw.columns = [str(c).replace("\xa0", " ").strip() for c in raw.columns]
-    df = pd.DataFrame({k: raw[[c for c in raw.columns if c.startswith(p)][0]].values for k, p in QUESTIONS.items()})
+    raw.columns = [str(c).replace("\xa0", " ").strip().lstrip("¿¡ ") for c in raw.columns]
+    df = pd.DataFrame({k: raw[[c for c in raw.columns if c.startswith(p)]].bfill(axis=1).iloc[:, 0].values
+                       for k, p in QUESTIONS.items()})
+    num = lambda s: pd.to_numeric(s.astype(str).str.extract(r"(\d+(?:\.\d+)?)")[0], errors="coerce")
     df["midterm"] = pd.to_numeric(df["midterm"], errors="coerce")
-    df["gpa_prev"] = pd.to_numeric(df["gpa_prev"], errors="coerce").replace(0, np.nan)
-    df["courses"] = pd.to_numeric(df["courses"].astype(str).str.extract(r"(\d+)")[0], errors="coerce")
+    df["gpa_prev"] = num(df["gpa_prev"]).replace(0, np.nan)
+    for col in ["courses", "study_hours_day", "preparation"]:
+        df[col] = num(df[col])
     df["attendance_pct"] = df["attendance"].astype(str).str.strip().map(
         {"Less than 70%": 65, "80%": 80, "90%": 90, "100%": 100})
     df["sleep_n"] = df["sleep"].astype(str).str.strip().map({s: i + 1 for i, s in enumerate(SLEEP_EN)})
@@ -72,7 +75,7 @@ def train():
     model = make_model().fit(X, y)
     return model, y, {"mae": -cv["test_neg_mean_absolute_error"].mean(),
                       "rmse": -cv["test_neg_root_mean_squared_error"].mean(),
-                      "r2": cv["test_r2"].mean(), "n": len(y)}
+                      "r2": cv["test_r2"].mean()}
 
 
 with st.spinner("Preparando el modelo…"):
@@ -132,7 +135,7 @@ if sent:
 
     tips = []
     if prep <= 3:
-        tips.append("Sentirte mejor preparado(a) es lo que más se asocia con mejores calificaciones.")
+        tips.append("Sentirte mejor preparado(a) se asocia con mejores calificaciones.")
     if ATT[att] < 90:
         tips.append("Subir tu asistencia a 90% o más podría ayudarte.")
     if tips:
@@ -143,7 +146,7 @@ else:
 with st.expander("¿Cómo funciona?"):
     st.markdown(
         f"""
-- El modelo se entrenó con las respuestas de **{metrics['n']} alumnos de la UAP** (promedio del semestre anterior).
+- El modelo se entrenó con las respuestas de **alumnos de la UAP** a la encuesta (promedio del semestre anterior).
 - Combina dos modelos de *machine learning*: **Ridge regression** y **Random Forest**; la estimación es el promedio de ambos.
 - Probado con validación cruzada (alumnos que el modelo no vio), se equivoca en promedio **±{metrics['mae']:.2f} puntos**.
 - La pregunta que más pesa es tu **calificación de parciales**.
